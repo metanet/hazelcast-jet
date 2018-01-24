@@ -17,15 +17,18 @@
 package com.hazelcast.jet.impl;
 
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
+import com.hazelcast.core.IMap;
 import com.hazelcast.instance.Node;
 import com.hazelcast.internal.cluster.ClusterService;
 import com.hazelcast.internal.partition.impl.InternalPartitionServiceImpl;
 import com.hazelcast.jet.JetException;
 import com.hazelcast.jet.config.JetConfig;
 import com.hazelcast.jet.config.JobConfig;
+import com.hazelcast.jet.config.ProcessingGuarantee;
 import com.hazelcast.jet.core.JobNotFoundException;
 import com.hazelcast.jet.core.JobStatus;
 import com.hazelcast.jet.impl.deployment.JetClassLoader;
+import com.hazelcast.jet.impl.execution.SnapshotRecord;
 import com.hazelcast.jet.impl.execution.SnapshotRecord.SnapshotStatus;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.nio.serialization.Data;
@@ -53,6 +56,7 @@ import static com.hazelcast.jet.core.JobStatus.NOT_STARTED;
 import static com.hazelcast.jet.core.JobStatus.RUNNING;
 import static com.hazelcast.jet.impl.execution.SnapshotRecord.SnapshotStatus.FAILED;
 import static com.hazelcast.jet.impl.execution.SnapshotRecord.SnapshotStatus.SUCCESSFUL;
+import static com.hazelcast.jet.impl.util.JetGroupProperty.JOB_RESTART_STRATEGY;
 import static com.hazelcast.jet.impl.util.JetGroupProperty.JOB_SCAN_PERIOD;
 import static com.hazelcast.jet.impl.util.Util.idToString;
 import static com.hazelcast.jet.impl.util.Util.jobAndExecutionId;
@@ -66,6 +70,7 @@ public class JobCoordinationService {
 
     private static final String COORDINATOR_EXECUTOR_NAME = "jet:coordinator";
     private static final long RETRY_DELAY_IN_MILLIS = SECONDS.toMillis(2);
+    private static final double PASSED_SNAPSHOT_INTERVAL_RATIO_TO_RESTART_JOB = 0.2;
 
     private final NodeEngineImpl nodeEngine;
     private final JetConfig config;
@@ -387,6 +392,52 @@ public class JobCoordinationService {
         throw new JobNotFoundException(jobId);
     }
 
+    public boolean triggerRestart(long jobId) {
+        MasterContext masterContext = masterContexts.get(jobId);
+        boolean requested = masterContext != null && masterContext.requestRestart();
+        if (requested) {
+            JobRestartStrategy jobRestartStrategy = getJobRestartStrategy();
+            JobConfig jobConfig = masterContext.getJobConfig();
+
+            if (jobRestartStrategy == JobRestartStrategy.IMMEDIATELY
+                    || jobConfig.getProcessingGuarantee() == ProcessingGuarantee.NONE) {
+                logger.info("Attempting to cancel current execution of job " + idToString(jobId));
+                return masterContext.cancelCurrentExecution();
+            }
+
+            if (jobRestartStrategy == JobRestartStrategy.WITH_SHORT_ROLLBACK) {
+                Long startTime = null;
+                Long snapshotId = snapshotRepository.latestCompleteSnapshot(jobId);
+                if (snapshotId != null) {
+                    IMap<Long, SnapshotRecord> snapshots = snapshotRepository.getSnapshotMap(jobId);
+                    SnapshotRecord snapshotRecord = snapshots.get(snapshotId);
+                    if (snapshotRecord != null && snapshotRecord.isSuccessful()) {
+                        startTime = snapshotRecord.startTime();
+                    }
+                }
+
+                if (startTime == null) {
+                    startTime = masterContext.getExecutionStartTime();
+                }
+
+                if (startTime != null) {
+                    long passed = System.currentTimeMillis() - startTime;
+                    long snapshotInterval = jobConfig.getSnapshotIntervalMillis();
+                    if (((double) passed) / snapshotInterval < PASSED_SNAPSHOT_INTERVAL_RATIO_TO_RESTART_JOB) {
+                        logger.info("Attempting to cancel current execution of job " + idToString(jobId));
+                        masterContext.cancelCurrentExecution();
+                    }
+                }
+            }
+        }
+
+        return requested;
+    }
+
+    private JobRestartStrategy getJobRestartStrategy() {
+        return JobRestartStrategy.valueOf(nodeEngine.getProperties().get(JOB_RESTART_STRATEGY.getName()));
+    }
+
     SnapshotRepository snapshotRepository() {
         return snapshotRepository;
     }
@@ -487,7 +538,10 @@ public class JobCoordinationService {
             } catch (Exception e) {
                 logger.warning("Cannot delete old snapshots for " + jobAndExecutionId(jobId, executionId));
             }
-            scheduleSnapshot(jobId, executionId);
+
+            if (!(isSuccess && masterContext.cancelCurrentExecution())) {
+                scheduleSnapshot(jobId, executionId);
+            }
         } else {
             logger.warning("MasterContext not found to finalize snapshot of " + jobAndExecutionId(jobId, executionId)
                     + " with result: " + isSuccess);

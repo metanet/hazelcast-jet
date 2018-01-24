@@ -33,9 +33,11 @@ import com.hazelcast.jet.impl.JetService;
 import com.hazelcast.jet.impl.JobRepository;
 import com.hazelcast.jet.impl.JobResult;
 import com.hazelcast.jet.impl.MasterContext;
+import com.hazelcast.jet.impl.execution.SnapshotRecord;
 import com.hazelcast.jet.impl.execution.init.ExecutionPlan;
 import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
 import com.hazelcast.jet.impl.operation.InitExecutionOperation;
+import com.hazelcast.jet.stream.IStreamMap;
 import com.hazelcast.test.HazelcastParametersRunnerFactory;
 import org.junit.After;
 import org.junit.Before;
@@ -55,6 +57,7 @@ import java.util.concurrent.Future;
 
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.MEMBER_INFO_UPDATE;
 import static com.hazelcast.internal.partition.impl.PartitionDataSerializerHook.SHUTDOWN_REQUEST;
+import static com.hazelcast.jet.config.ProcessingGuarantee.AT_LEAST_ONCE;
 import static com.hazelcast.jet.core.JobStatus.RUNNING;
 import static com.hazelcast.jet.core.JobStatus.STARTING;
 import static com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook.INIT_EXECUTION_OP;
@@ -96,8 +99,8 @@ public class TopologyChangeTest extends JetTestSupport {
     public static Collection<boolean[]> parameters() {
         return Arrays.asList(new boolean[][] {
                 {false, false, false},
-                {true, false, false},
-                {false, true, false}
+//                {true, false, false},
+//                {false, true, false}
         });
     }
 
@@ -229,7 +232,7 @@ public class TopologyChangeTest extends JetTestSupport {
     @Test
     public void when_nonCoordinatorLeavesDuringExecution_then_clientStillGetsJobResult() throws Throwable {
         // Given
-        JetClientInstanceImpl client = factory.newClient();
+        JetInstance client = factory.newClient();
         DAG dag = new DAG().vertex(new Vertex("test", new MockPS(StuckProcessor::new, nodeCount)));
 
         // When
@@ -484,4 +487,31 @@ public class TopologyChangeTest extends JetTestSupport {
             assertTrue(e.getCause() instanceof IllegalArgumentException);
         }
     }
+
+    @Test
+    public void when_newNodeIsAdded_then_jobIsRestarted() throws Throwable {
+        // Given that the submitted job is running
+        JetInstance client = factory.newClient();
+        DAG dag = new DAG().vertex(new Vertex("test", new MockPS(StuckProcessor::new, nodeCount)));
+        JobConfig jobConfig = new JobConfig().setProcessingGuarantee(AT_LEAST_ONCE).setSnapshotIntervalMillis(10000);
+        Job job = client.newJob(dag, jobConfig);
+        StuckProcessor.executionStarted.await();
+
+        IStreamMap<Long, SnapshotRecord> snapshotMap = getJetService(instances[0]).getSnapshotRepository()
+                                                                                  .getSnapshotMap(job.getId());
+
+        assertTrueEventually(() -> assertFalse(snapshotMap.isEmpty()));
+
+        // When the job is restarted after a new member joins to the cluster
+        factory.newMember();
+        job.restart();
+        StuckProcessor.proceedLatch.countDown();
+
+        // Then, the job restarts and successfully completes
+        assertTrueEventually(() -> {
+            assertEquals(nodeCount * 2 + 1, MockPS.initCount.get());
+            assertEquals(nodeCount * 2 + 1, MockPS.completeCount.get());
+        });
+    }
+
 }

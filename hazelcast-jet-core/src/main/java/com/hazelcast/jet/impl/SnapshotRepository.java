@@ -111,7 +111,7 @@ public class SnapshotRepository {
      * Return the newest complete snapshot ID for the specified job or null if no such snapshot is found.
      */
     @Nullable
-    Long latestCompleteSnapshot(long jobId) {
+    public Long latestCompleteSnapshot(long jobId) {
         IStreamMap<Long, Object> snapshotMap = getSnapshotMap(jobId);
         MaxByAggregator<Entry<Long, Object>> entryMaxByAggregator = maxByAggregator();
         Predicate<Long, Object> completedSnapshots = (Predicate<Long, Object>) e -> {

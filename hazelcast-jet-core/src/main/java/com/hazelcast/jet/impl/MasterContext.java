@@ -106,7 +106,10 @@ public class MasterContext {
 
     private volatile long executionId;
     private volatile long jobStartTime;
+    private volatile Long executionStartTime;
     private volatile Map<MemberInfo, ExecutionPlan> executionPlanMap;
+    private volatile ExecutionCallback<Object> executionCallback;
+    private final AtomicBoolean restartRequested = new AtomicBoolean();
 
     MasterContext(NodeEngineImpl nodeEngine, JobCoordinationService coordinationService, JobRecord jobRecord) {
         this.nodeEngine = nodeEngine;
@@ -137,6 +140,10 @@ public class MasterContext {
         return jobRecord;
     }
 
+    public Long getExecutionStartTime() {
+        return executionStartTime;
+    }
+
     public CompletableFuture<Void> completionFuture() {
         return completionFuture;
     }
@@ -147,6 +154,28 @@ public class MasterContext {
 
     boolean isCancelled() {
         return cancellationFuture.isCancelled();
+    }
+
+    boolean requestRestart() {
+        return restartRequested.compareAndSet(false, true);
+    }
+
+    public boolean cancelCurrentExecution() {
+        if (!restartRequested.get()) {
+            return false;
+        }
+
+        restartRequested.set(false);
+
+        ExecutionCallback<Object> executionCallback = this.executionCallback;
+        if (executionCallback != null) {
+            executionCallback.onFailure(new CancellationException());
+            logger.info("Restart is requested for " + jobIdString());
+            return true;
+        }
+
+        logger.warning("Restart is not requested for " + jobIdString() + " because not in execution step currently");
+        return false;
     }
 
     /**
@@ -372,7 +401,6 @@ public class MasterContext {
     // If a participant leaves or the execution fails in a participant locally, executions are cancelled
     // on the remaining participants and the callback is completed after all invocations return.
     private void invokeStartExecution() {
-        jobStatus.set(RUNNING);
         logger.fine("Executing " + jobIdString());
 
         long executionId = this.executionId;
@@ -398,7 +426,17 @@ public class MasterContext {
         }));
 
         Function<ExecutionPlan, Operation> operationCtor = plan -> new StartExecutionOperation(jobId, executionId);
-        invoke(operationCtor, this::onExecuteStepCompleted, callback);
+        Consumer<Map<MemberInfo, Object>> completionCallback = results -> {
+            executionCallback = null;
+            executionStartTime = null;
+            onExecuteStepCompleted(results);
+        };
+
+        this.executionCallback = callback;
+        this.executionStartTime = System.currentTimeMillis();
+        jobStatus.set(RUNNING);
+
+        invoke(operationCtor, completionCallback, callback);
 
         if (isSnapshottingEnabled()) {
             coordinationService.scheduleSnapshot(jobId, executionId);
@@ -412,7 +450,7 @@ public class MasterContext {
         });
     }
 
-    void beginSnapshot(long executionId) {
+    public void beginSnapshot(long executionId) {
         if (this.executionId != executionId) {
             // current execution is completed and probably a new execution has started
             logger.warning("Not beginning snapshot since expected execution id " + idToString(this.executionId)

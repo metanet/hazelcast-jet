@@ -150,6 +150,10 @@ public class JetService
         return jobExecutionService;
     }
 
+    public SnapshotRepository getSnapshotRepository() {
+        return snapshotRepository;
+    }
+
     public ClassLoader getClassLoader(long jobId) {
         return jobCoordinationService.getClassLoader(jobId);
     }
