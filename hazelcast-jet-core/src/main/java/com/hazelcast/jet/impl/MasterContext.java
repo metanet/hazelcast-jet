@@ -107,6 +107,7 @@ public class MasterContext {
     private volatile long executionId;
     private volatile long jobStartTime;
     private volatile Map<MemberInfo, ExecutionPlan> executionPlanMap;
+    private volatile ExecutionCallback<Object> executionCallback;
 
     MasterContext(NodeEngineImpl nodeEngine, JobCoordinationService coordinationService, JobRecord jobRecord) {
         this.nodeEngine = nodeEngine;
@@ -372,7 +373,6 @@ public class MasterContext {
     // If a participant leaves or the execution fails in a participant locally, executions are cancelled
     // on the remaining participants and the callback is completed after all invocations return.
     private void invokeStartExecution() {
-        jobStatus.set(RUNNING);
         logger.fine("Executing " + jobIdString());
 
         long executionId = this.executionId;
@@ -398,7 +398,17 @@ public class MasterContext {
         }));
 
         Function<ExecutionPlan, Operation> operationCtor = plan -> new StartExecutionOperation(jobId, executionId);
-        invoke(operationCtor, this::onExecuteStepCompleted, callback);
+        Consumer<Map<MemberInfo, Object>> completionCallback = results -> {
+            executionCallback = null;
+            onExecuteStepCompleted(results);
+        };
+
+        // We must set executionCancellationCallback before we call invoke() method because once all invocations
+        // are done, executionCancellationCallback will be reset. Therefore, setting it after the invoke() call is racy.
+        executionCallback = callback;
+        jobStatus.set(RUNNING);
+
+        invoke(operationCtor, completionCallback, callback);
 
         if (isSnapshottingEnabled()) {
             coordinationService.scheduleSnapshot(jobId, executionId);
@@ -410,6 +420,19 @@ public class MasterContext {
             Function<ExecutionPlan, Operation> operationCtor = plan -> new CancelExecutionOperation(jobId, executionId);
             invoke(operationCtor, responses -> { }, null);
         });
+    }
+
+    /**
+     * Cancels the execution invocation If the job is currently being executed
+     */
+    boolean cancelCurrentExecution() {
+        ExecutionCallback<Object> callback = this.executionCallback;
+        if (callback != null) {
+            callback.onFailure(null);
+            return true;
+        }
+
+        return false;
     }
 
     void beginSnapshot(long executionId) {

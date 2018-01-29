@@ -26,6 +26,7 @@ import com.hazelcast.jet.impl.operation.GetJobStatusOperation;
 import com.hazelcast.jet.impl.operation.GetJobSubmissionTimeOperation;
 import com.hazelcast.jet.impl.operation.JoinSubmittedJobOperation;
 import com.hazelcast.jet.impl.operation.SubmitJobOperation;
+import com.hazelcast.jet.impl.operation.TriggerJobRestartOperation;
 import com.hazelcast.logging.LoggingService;
 import com.hazelcast.nio.Address;
 import com.hazelcast.nio.serialization.Data;
@@ -55,6 +56,15 @@ public class JobProxy extends AbstractJobProxy<NodeEngineImpl> {
         return uncheckCall(
                 () -> this.<JobStatus>invokeOp(
                         new GetJobStatusOperation(getId())
+                ).get()
+        );
+    }
+
+    @Override
+    public boolean restart() {
+        return uncheckCall(
+                () -> this.<Boolean>invokeOp(
+                        new TriggerJobRestartOperation(getId())
                 ).get()
         );
     }

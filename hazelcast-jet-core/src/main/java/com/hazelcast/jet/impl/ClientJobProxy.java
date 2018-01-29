@@ -24,6 +24,7 @@ import com.hazelcast.client.impl.protocol.codec.JetGetJobStatusCodec;
 import com.hazelcast.client.impl.protocol.codec.JetGetJobSubmissionTimeCodec;
 import com.hazelcast.client.impl.protocol.codec.JetJoinSubmittedJobCodec;
 import com.hazelcast.client.impl.protocol.codec.JetSubmitJobCodec;
+import com.hazelcast.client.impl.protocol.codec.JetTriggerJobRestartCodec;
 import com.hazelcast.client.spi.impl.ClientInvocation;
 import com.hazelcast.core.ExecutionCallback;
 import com.hazelcast.core.ICompletableFuture;
@@ -66,6 +67,15 @@ public class ClientJobProxy extends AbstractJobProxy<HazelcastClientInstanceImpl
             ClientMessage response = invocation(request, masterAddress()).invoke().get();
             Data statusData = JetGetJobStatusCodec.decodeResponse(response).response;
             return serializationService().toObject(statusData);
+        });
+    }
+
+    @Override
+    public boolean restart() {
+        ClientMessage request = JetTriggerJobRestartCodec.encodeRequest(getId());
+        return uncheckCall(() -> {
+            ClientMessage response = invocation(request, masterAddress()).invoke().get();
+            return JetTriggerJobRestartCodec.decodeResponse(response).response;
         });
     }
 

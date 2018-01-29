@@ -387,6 +387,40 @@ public class JobCoordinationService {
         throw new JobNotFoundException(jobId);
     }
 
+    /**
+     * Restarts execution of the given job.
+     *
+     * @throws IllegalStateException if the job is already completed or no job record is found
+     *
+     * @return true if the given job is currently being executed and its execution is cancelled, false otherwise.
+     */
+    public boolean triggerRestart(long jobId) {
+        MasterContext masterContext = masterContexts.get(jobId);
+        if (masterContext == null) {
+            JobResult jobResult = jobRepository.getJobResult(jobId);
+            if (jobResult != null) {
+                throw new IllegalStateException("Cannot restart job " + idToString(jobId) + " because it is already "
+                        + jobResult.getJobStatus());
+            }
+
+            if (jobRepository.getJobRecord(jobId) != null) {
+                logger.warning("Cannot restart job " + idToString(jobId) + " because it is not initialized yet");
+                return false;
+            }
+
+            throw new IllegalStateException("Cannot restart job " + idToString(jobId) + " because JobRecord not found");
+        }
+
+        boolean cancelled = masterContext.cancelCurrentExecution();
+        if (cancelled) {
+            logger.info("Job " + idToString(jobId) + " is going to be restarted");
+        } else {
+            logger.warning("Cannot restart job " + idToString(jobId) + " because it is not currently being executed");
+        }
+
+        return cancelled;
+    }
+
     SnapshotRepository snapshotRepository() {
         return snapshotRepository;
     }
