@@ -20,34 +20,41 @@ import com.hazelcast.jet.JetInstance;
 import com.hazelcast.jet.JetTestInstanceFactory;
 import com.hazelcast.jet.Job;
 import com.hazelcast.jet.config.JetConfig;
-import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.core.TestProcessors.MockPS;
 import com.hazelcast.jet.core.TestProcessors.StuckForeverSourceP;
 import com.hazelcast.jet.core.TestProcessors.StuckProcessor;
+import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 
-import static com.hazelcast.jet.config.ProcessingGuarantee.AT_LEAST_ONCE;
+import static com.hazelcast.test.PacketFiltersUtil.dropOperationsBetween;
+import static com.hazelcast.test.PacketFiltersUtil.resetPacketFiltersFrom;
+import static java.util.Collections.singletonList;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 
 @RunWith(HazelcastSerialClassRunner.class)
-public class JobScaleUpTest extends JetTestSupport {
+public class ManualRestartTest extends JetTestSupport {
 
-    private static final int NODE_COUNT = 3;
+    private static final int NODE_COUNT = 2;
 
     private static final int LOCAL_PARALLELISM = 1;
+
 
     private JetTestInstanceFactory factory;
 
     private DAG dag;
 
-    private JobConfig jobConfig;
+    private JetInstance[] instances;
 
     @Before
     public void setup() {
@@ -60,7 +67,8 @@ public class JobScaleUpTest extends JetTestSupport {
 
         factory = new JetTestInstanceFactory();
         dag = new DAG().vertex(new Vertex("test", new MockPS(StuckForeverSourceP::new, NODE_COUNT)));
-        jobConfig = new JobConfig().setProcessingGuarantee(AT_LEAST_ONCE);
+
+        instances = factory.newMembers(new JetConfig(), NODE_COUNT);
     }
 
     @After
@@ -70,11 +78,9 @@ public class JobScaleUpTest extends JetTestSupport {
 
     @Test
     public void when_jobIsRunning_then_itRestarts() {
-        // Given that the submitted job is running
-        factory.newMembers(new JetConfig(), NODE_COUNT);
+        // Given that the job is running
         JetInstance client = factory.newClient();
-        jobConfig.setSnapshotIntervalMillis(5_000);
-        Job job = client.newJob(dag, jobConfig);
+        Job job = client.newJob(dag);
 
         assertTrueEventually(() -> {
             assertEquals(NODE_COUNT, MockPS.initCount.get());
@@ -93,6 +99,41 @@ public class JobScaleUpTest extends JetTestSupport {
         assertTrueEventually(() -> {
             assertEquals(initCount, MockPS.initCount.get());
         });
+    }
+
+    @Test
+    public void when_jobIsNotBeingExecuted_then_itCannotBeRestarted() {
+        // Given that the job execution has not started
+        dropOperationsBetween(instances[0].getHazelcastInstance(), instances[1].getHazelcastInstance(),
+                JetInitDataSerializerHook.FACTORY_ID, singletonList(JetInitDataSerializerHook.INIT_EXECUTION_OP));
+
+        JetInstance client = factory.newClient();
+        Job job = client.newJob(dag);
+
+        assertTrueEventually(() -> assertTrue(job.getStatus() == JobStatus.STARTING));
+
+        // Then, the job cannot restart
+        assertFalse(job.restart());
+
+        resetPacketFiltersFrom(instances[0].getHazelcastInstance());
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void when_jobIsCompleted_then_isCannotBeRestarted() {
+        // Given that the job is completed
+        JetInstance client = factory.newClient();
+        Job job = client.newJob(dag);
+
+        job.cancel();
+
+        try {
+            job.join();
+            fail();
+        } catch (CancellationException ignored) {
+        }
+
+        // Then, the job cannot restart
+        job.restart();
     }
 
 }

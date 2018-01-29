@@ -44,6 +44,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import static com.hazelcast.jet.impl.util.ExceptionUtil.rethrow;
 import static com.hazelcast.jet.impl.util.Util.idToString;
 import static com.hazelcast.jet.impl.util.Util.uncheckCall;
 
@@ -72,11 +73,13 @@ public class ClientJobProxy extends AbstractJobProxy<HazelcastClientInstanceImpl
 
     @Override
     public boolean restart() {
-        ClientMessage request = JetTriggerJobRestartCodec.encodeRequest(getId());
-        return uncheckCall(() -> {
+        try {
+            ClientMessage request = JetTriggerJobRestartCodec.encodeRequest(getId());
             ClientMessage response = invocation(request, masterAddress()).invoke().get();
             return JetTriggerJobRestartCodec.decodeResponse(response).response;
-        });
+        } catch (ExecutionException | InterruptedException e) {
+            throw rethrow(e);
+        }
     }
 
     @Override

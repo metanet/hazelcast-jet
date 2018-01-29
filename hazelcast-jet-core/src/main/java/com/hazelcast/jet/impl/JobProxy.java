@@ -35,7 +35,9 @@ import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.spi.serialization.SerializationService;
 
 import javax.annotation.Nonnull;
+import java.util.concurrent.ExecutionException;
 
+import static com.hazelcast.jet.impl.util.ExceptionUtil.rethrow;
 import static com.hazelcast.jet.impl.util.Util.uncheckCall;
 
 /**
@@ -62,11 +64,11 @@ public class JobProxy extends AbstractJobProxy<NodeEngineImpl> {
 
     @Override
     public boolean restart() {
-        return uncheckCall(
-                () -> this.<Boolean>invokeOp(
-                        new TriggerJobRestartOperation(getId())
-                ).get()
-        );
+        try {
+            return this.<Boolean>invokeOp(new TriggerJobRestartOperation(getId())).get();
+        } catch (ExecutionException | InterruptedException e) {
+            throw rethrow(e);
+        }
     }
 
     @Override
