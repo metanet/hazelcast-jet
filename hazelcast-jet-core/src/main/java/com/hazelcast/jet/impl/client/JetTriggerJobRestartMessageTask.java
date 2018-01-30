@@ -20,7 +20,7 @@ import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.JetTriggerJobRestartCodec;
 import com.hazelcast.client.impl.protocol.codec.JetTriggerJobRestartCodec.RequestParameters;
 import com.hazelcast.instance.Node;
-import com.hazelcast.jet.impl.operation.TriggerJobRestartOperation;
+import com.hazelcast.jet.impl.operation.RestartJobOperation;
 import com.hazelcast.nio.Connection;
 import com.hazelcast.spi.Operation;
 
@@ -32,7 +32,7 @@ public class JetTriggerJobRestartMessageTask extends AbstractJetMessageTask<Requ
 
     @Override
     protected Operation prepareOperation() {
-        return new TriggerJobRestartOperation(parameters.jobId);
+        return new RestartJobOperation(parameters.jobId);
     }
 
     @Override

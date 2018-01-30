@@ -107,7 +107,7 @@ public class MasterContext {
     private volatile long executionId;
     private volatile long jobStartTime;
     private volatile Map<MemberInfo, ExecutionPlan> executionPlanMap;
-    private volatile ExecutionCallback<Object> executionCallback;
+    private volatile ExecutionCallback<Object> executionCancellationCallback;
 
     MasterContext(NodeEngineImpl nodeEngine, JobCoordinationService coordinationService, JobRecord jobRecord) {
         this.nodeEngine = nodeEngine;
@@ -142,7 +142,7 @@ public class MasterContext {
         return completionFuture;
     }
 
-    boolean cancel() {
+    boolean cancelJob() {
         return cancellationFuture.cancel(true);
     }
 
@@ -399,13 +399,13 @@ public class MasterContext {
 
         Function<ExecutionPlan, Operation> operationCtor = plan -> new StartExecutionOperation(jobId, executionId);
         Consumer<Map<MemberInfo, Object>> completionCallback = results -> {
-            executionCallback = null;
+            executionCancellationCallback = null;
             onExecuteStepCompleted(results);
         };
 
         // We must set executionCancellationCallback before we call invoke() method because once all invocations
         // are done, executionCancellationCallback will be reset. Therefore, setting it after the invoke() call is racy.
-        executionCallback = callback;
+        executionCancellationCallback = callback;
         jobStatus.set(RUNNING);
 
         invoke(operationCtor, completionCallback, callback);
@@ -423,10 +423,10 @@ public class MasterContext {
     }
 
     /**
-     * Cancels the execution invocation If the job is currently being executed
+     * Cancels the execution invocation in order to restart it afterwards if the job is currently being executed
      */
     boolean cancelCurrentExecution() {
-        ExecutionCallback<Object> callback = this.executionCallback;
+        ExecutionCallback<Object> callback = this.executionCancellationCallback;
         if (callback != null) {
             callback.onFailure(null);
             return true;

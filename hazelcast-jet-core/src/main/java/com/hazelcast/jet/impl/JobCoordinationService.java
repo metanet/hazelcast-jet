@@ -96,7 +96,7 @@ public class JobCoordinationService {
     }
 
     public void reset() {
-        masterContexts.values().forEach(MasterContext::cancel);
+        masterContexts.values().forEach(MasterContext::cancelJob);
     }
 
     public ClassLoader getClassLoader(long jobId) {
@@ -286,7 +286,7 @@ public class JobCoordinationService {
 
         if (!masterContext.isCancelled()) {
             logger.info("Job " + idToString(jobId) + " cancellation is triggered");
-            masterContext.cancel();
+            masterContext.cancelJob();
         } else {
             logger.info("Job " + idToString(jobId) + " is already cancelling...");
         }
@@ -394,7 +394,7 @@ public class JobCoordinationService {
      *
      * @return true if the given job is currently being executed and its execution is cancelled, false otherwise.
      */
-    public boolean triggerRestart(long jobId) {
+    public boolean restartJobExecution(long jobId) {
         MasterContext masterContext = masterContexts.get(jobId);
         if (masterContext == null) {
             JobResult jobResult = jobRepository.getJobResult(jobId);

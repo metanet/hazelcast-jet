@@ -19,14 +19,13 @@ package com.hazelcast.jet.impl.operation;
 import com.hazelcast.jet.impl.JetService;
 import com.hazelcast.jet.impl.JobCoordinationService;
 import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
-import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 
 import java.util.concurrent.CompletableFuture;
 
 import static com.hazelcast.jet.impl.util.ExceptionUtil.peel;
 import static com.hazelcast.jet.impl.util.ExceptionUtil.withTryCatch;
 
-public class JoinSubmittedJobOperation extends AsyncOperation implements IdentifiedDataSerializable {
+public class JoinSubmittedJobOperation extends AsyncOperation {
 
     public JoinSubmittedJobOperation() {
     }

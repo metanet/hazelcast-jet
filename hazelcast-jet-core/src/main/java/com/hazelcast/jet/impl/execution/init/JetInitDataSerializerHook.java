@@ -33,7 +33,7 @@ import com.hazelcast.jet.impl.operation.CompleteExecutionOperation;
 import com.hazelcast.jet.impl.operation.GetJobConfigOperation;
 import com.hazelcast.jet.impl.operation.GetJobIdsByNameOperation;
 import com.hazelcast.jet.impl.operation.GetJobSubmissionTimeOperation;
-import com.hazelcast.jet.impl.operation.TriggerJobRestartOperation;
+import com.hazelcast.jet.impl.operation.RestartJobOperation;
 import com.hazelcast.jet.impl.operation.StartExecutionOperation;
 import com.hazelcast.jet.impl.operation.GetJobIdsOperation;
 import com.hazelcast.jet.impl.operation.GetJobStatusOperation;
@@ -153,7 +153,7 @@ public final class JetInitDataSerializerHook implements DataSerializerHook {
                 case GET_JOB_CONFIG_OP:
                     return new GetJobConfigOperation();
                 case TRIGGER_JOB_RESTART_OP:
-                    return new TriggerJobRestartOperation();
+                    return new RestartJobOperation();
                 default:
                     throw new IllegalArgumentException("Unknown type id " + typeId);
             }

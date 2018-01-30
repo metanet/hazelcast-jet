@@ -23,21 +23,21 @@ import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 /**
  * Cancels the current execution of the job and triggers a new execution
  */
-public class TriggerJobRestartOperation extends AbstractJobOperation implements IdentifiedDataSerializable {
+public class RestartJobOperation extends AbstractJobOperation implements IdentifiedDataSerializable {
 
     private boolean response;
 
-    public TriggerJobRestartOperation() {
+    public RestartJobOperation() {
     }
 
-    public TriggerJobRestartOperation(long jobId) {
+    public RestartJobOperation(long jobId) {
         super(jobId);
     }
 
     @Override
     public void run() throws Exception {
         JetService service = getService();
-        response = service.getJobCoordinationService().triggerRestart(jobId());
+        response = service.getJobCoordinationService().restartJobExecution(jobId());
     }
 
     @Override
